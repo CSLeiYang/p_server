@@ -12,33 +12,43 @@ import (
 	"sync"
 	"time"
 
+	api "csleiyang.com/p_server/api"
+	dbutil "csleiyang.com/p_server/dbutil"
 	log "csleiyang.com/p_server/logger"
-
 	private_channel "csleiyang.com/p_server/private_channel"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/rs/cors"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
-
-var clients = make(map[*websocket.Conn]*private_channel.PUdpConn)
-var broadcast = make(chan Message)
-var mutex = &sync.Mutex{}
-
-type Message struct {
-	UserID  string                   `json:"userid"`
-	Message string                   `json:"message"`
-	BizInfo private_channel.PCommand `json:"biz_info"`
-}
+var (
+	upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     func(r *http.Request) bool { return true },
+	}
+	clients   = make(map[string]*private_channel.PUdpConn)
+	broadcast = make(chan private_channel.WsMessage)
+	mutex     sync.Mutex
+	db        *dbutil.MySQLDB
+)
 
 func main() {
+	var err error
+	// dsn := "user:password@tcp(localhost:3306)/dbname"
+	dsn := "test.db"
+	db, err = dbutil.NewMySQLDB(dsn)
+	if err != nil {
+		log.Error(err)
+	}
+	defer db.Close()
+
+	err = db.CreateTable()
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
 	router := mux.NewRouter()
 
 	// WebSocket route
@@ -49,32 +59,46 @@ func main() {
 	router.HandleFunc("/download/{userid}/{filename}", downloadFile).Methods("GET")
 	router.HandleFunc("/public/download/{filename}", downloadPublicFile).Methods("GET")
 
+	// User routes
+	router.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+		api.RegisterUser(db, w, r)
+	}).Methods("POST")
+	router.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		api.LoginUser(db, w, r)
+	}).Methods("POST")
+	router.HandleFunc("/user/{userid}", func(w http.ResponseWriter, r *http.Request) {
+		api.GetUserHttp(db, w, r)
+	}).Methods("GET")
+	router.HandleFunc("/user/{userid}", func(w http.ResponseWriter, r *http.Request) {
+		api.UpdateUser(db, w, r)
+	}).Methods("PUT")
+	router.HandleFunc("/user/{userid}", func(w http.ResponseWriter, r *http.Request) {
+		api.DeleteUser(db, w, r)
+	}).Methods("DELETE")
+
 	// File server for public images
-	fs := http.FileServer(http.Dir("./public"))
+	fs := http.FileServer(http.Dir(private_channel.GetPublicDir()))
 	router.PathPrefix("/public/").Handler(http.StripPrefix("/public/", fs))
 
 	// Add CORS support
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE"},
 		AllowedHeaders:   []string{"*"},
 		AllowCredentials: true,
 	})
 
 	handler := c.Handler(router)
-	// Start the server
-	go handleMessages()
+	go handleWsMessages()
 
 	log.Info("Server started on :8000")
-	err := http.ListenAndServe(":8000", handler)
-	if err != nil {
+	if err := http.ListenAndServe(":8000", handler); err != nil {
 		log.Error("ListenAndServe: ", err)
 	}
 }
 
 func handleConnections(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["userid"]
+	userID := mux.Vars(r)["userid"]
 
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -83,75 +107,164 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
-	udpAddr, err := net.ResolveUDPAddr("udp", "165.227.25.123:8099")
+	mutex.Lock()
+	// Check if the user already has a WebSocket connection
+	if existingConn, ok := clients[userID]; ok {
+		log.Infof("User %s already has a WebSocket connection. Closing the old one.", userID)
+		existingConn.WsConn.Close()
+		delete(clients, userID)
+	}
+
+	udpAddr, err := net.ResolveUDPAddr("udp", private_channel.UDPServerAddress)
 	if err != nil {
 		log.Errorf("Failed to resolve UDP address: %v", err)
+		mutex.Unlock()
 		return
 	}
 
 	udpConn, err := net.DialUDP("udp", nil, udpAddr)
 	if err != nil {
 		log.Errorf("Failed to dial UDP address: %v", err)
+		mutex.Unlock()
 		return
 	}
 
 	userIdU, _ := strconv.ParseUint(userID, 10, 64)
-	pUdpConn := private_channel.NewPudpConn(userIdU, udpConn, udpAddr, ws, private_channel.HandlePEvent)
-
-	mutex.Lock()
-	clients[ws] = pUdpConn
+	pUdpConn := private_channel.NewPudpConn(userIdU, udpConn, nil, ws, private_channel.HandlePEvent)
+	clients[userID] = pUdpConn
 	mutex.Unlock()
 
 	go handlePings(ws)
-
 	defer func() {
 		mutex.Lock()
-		delete(clients, ws)
+		delete(clients, userID)
 		mutex.Unlock()
 		pUdpConn.UdpConnStop()
 	}()
 
+	go pUdpConn.ReadFromUDP()
+	readFromWebSocket(ws, userID)
+}
+
+func readFromWebSocket(ws *websocket.Conn, userID string) {
 	for {
-		var msg Message
-		err := ws.ReadJSON(&msg)
-		if err != nil {
-			log.Infof("WebSocket read error: %v, msg:%v", err, msg)
+		var msg private_channel.WsMessage
+		if err := ws.ReadJSON(&msg); err != nil {
+			log.Infof("WebSocket read error from user %s: %v", userID, err)
 			break
 		}
+		log.Infof("Received message from user %s: %v", userID, msg)
 		msg.UserID = userID
+		if msg.BizInfo.JsonParams == nil {
+			msg.BizInfo.JsonParams = make(map[string]interface{})
+		}
 		broadcast <- msg
 	}
 }
 
-func handleMessages() {
-	for {
-		msg := <-broadcast
+func handleWsMessages() {
+	for msg := range broadcast {
 		mutex.Lock()
-		for ws, pUdpConn := range clients {
+		for userID, pUdpConn := range clients {
+			log.Infof("Handling message for user: %s, message:%v", userID, msg)
 			msgUserIdUint, err := strconv.ParseUint(msg.UserID, 10, 64)
 			if err != nil {
-				log.Warnf("Can not parseUint,msg.UserID: %v", msg)
-				break
+				log.Warnf("Cannot parse Uint, msg.UserID: %v", msg)
+				continue
 			}
 
-			if clients[ws].StreamId == msgUserIdUint {
+			if clients[userID].StreamId == msgUserIdUint {
 				bizInfo, err := json.Marshal(&msg.BizInfo)
 				if err != nil {
 					log.Warn(err)
 					continue
 				}
-				err = pUdpConn.SendPrivateMessage(&private_channel.PrivateMessage{
-					StreamId:   msgUserIdUint,
-					BizInfo:    string(bizInfo),
-					Content:    []byte(msg.Message),
-					IsReliable: true,
-					IsStreaming: false,
-				})
-				if err != nil {
-					log.Infof("UDP send error: %v", err)
-					ws.Close()
-					delete(clients, ws)
+				if len(msg.BizInfo.Cmd) == 0 {
+					log.Warnf("msg.BizInfo.Cmd is empty, ignoring the message, msg: %v", msg)
+					continue
 				}
+
+				//copy jsonParams to bizInfo.jsonParams
+				for k, v := range msg.JsonParams {
+					msg.BizInfo.JsonParams[k] = v
+				}
+				switch msg.BizInfo.Cmd {
+				case "ASR", "IMAGE":
+					if len(msg.FileName) == 0 {
+						log.Warnf("file_name is empty, ignore the msg: %v", msg)
+						continue
+					}
+					fileUri := filepath.Join(private_channel.GetUserUploadDir(msg.UserID), msg.FileName)
+					fileContent, err := os.ReadFile(fileUri)
+					if err != nil {
+						log.Error(err)
+						continue
+					}
+					log.Infof("bizInfo: %s", string(bizInfo))
+					if msg.BizInfo.Cmd == "ASR" {
+						myUser, err := api.GetUser(db, userID)
+						if err == nil {
+							ttsConfig := make(map[string]interface{})
+							ttsConfig["ttsVoice"] = myUser.MyConfig.TTSVoice
+							ttsConfig["ttsSpeed"] = myUser.MyConfig.TTSSpeed
+							msg.BizInfo.JsonParams = ttsConfig
+
+						} else {
+							log.Error(err)
+						}
+					}
+					prompt, err := api.GetPromptFromDbByName(db, msg.JsonParams)
+					if err == nil && len(prompt) > 0 {
+						log.Info("get prompt from db:", prompt)
+						msg.BizInfo.JsonParams["prompt"] = prompt
+					}
+
+					bizInfo, _ = json.Marshal(&msg.BizInfo)
+					log.Info("modified bizInfo: ", string(bizInfo))
+					if err := pUdpConn.SendPrivateMessage(&private_channel.PrivateMessage{
+						StreamId:    msgUserIdUint,
+						Tid:         uint64(msg.ReqId),
+						BizInfo:     string(bizInfo),
+						Content:     fileContent,
+						IsReliable:  true,
+						IsStreaming: false,
+					}); err != nil {
+						log.Warnf("UDP send error: %v", err)
+						continue
+					}
+
+				default:
+					//CHAT or Prompt
+					finalContent := msg.Content
+					if bizPrompt, exist := msg.JsonParams[api.BIZ_PROMPT]; exist {
+						bizPromptStr, ok := bizPrompt.(string)
+						if !ok {
+							log.Error("Error: BIZ_PROMPT is not a string")
+							continue
+						}
+						log.Info("bizPrompt:", bizPromptStr)
+						promtpDb, err := api.GetPrompt(db, bizPromptStr)
+						if err != nil {
+							log.Error(err)
+							continue
+						}
+						finalContent = api.ReplacePlaceholders(promtpDb.Prompt, msg.JsonParams, msg.Content)
+					}
+					log.Info("finalContent:", finalContent)
+
+					if err := pUdpConn.SendPrivateMessage(&private_channel.PrivateMessage{
+						StreamId:    msgUserIdUint,
+						BizInfo:     string(bizInfo),
+						Content:     []byte(finalContent),
+						IsReliable:  true,
+						IsStreaming: false,
+						Tid:         uint64(msg.ReqId),
+					}); err != nil {
+						log.Infof("UDP send error: %v", err)
+
+					}
+				}
+
 			}
 		}
 		mutex.Unlock()
@@ -162,26 +275,20 @@ func handlePings(ws *websocket.Conn) {
 	ticker := time.NewTicker(50 * time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			err := ws.WriteMessage(websocket.PingMessage, []byte{})
-			if err != nil {
-				log.Infof("WebSocket ping error: %v", err)
-				ws.Close()
-				return
-			}
+	for range ticker.C {
+		if err := ws.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+			log.Infof("WebSocket ping error: %v", err)
+			ws.Close()
+			return
 		}
 	}
 }
 
 func uploadFile(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["userid"]
-	log.Info("uploadFile comming")
+	userID := mux.Vars(r)["userid"]
+	log.Info("uploadFile incoming")
 
-	err := r.ParseMultipartForm(10 << 20)
-	if err != nil {
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		log.Infof("ParseMultipartForm error: %v", err)
 		http.Error(w, "Failed to parse form", http.StatusInternalServerError)
 		return
@@ -195,14 +302,11 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	userUploadDir := filepath.Join("./user_data", userID, "upload")
-	if _, err := os.Stat(userUploadDir); os.IsNotExist(err) {
-		err := os.MkdirAll(userUploadDir, 0755)
-		if err != nil {
-			log.Infof("Directory creation error: %v", err)
-			http.Error(w, "Failed to create directory", http.StatusInternalServerError)
-			return
-		}
+	userUploadDir := private_channel.GetUserUploadDir(userID)
+	if err := private_channel.EnsureDir(userUploadDir); err != nil {
+		log.Infof("Directory creation error: %v", err)
+		http.Error(w, "Failed to create directory", http.StatusInternalServerError)
+		return
 	}
 
 	dst, err := os.Create(filepath.Join(userUploadDir, handler.Filename))
@@ -213,8 +317,7 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer dst.Close()
 
-	_, err = io.Copy(dst, file)
-	if err != nil {
+	if _, err := io.Copy(dst, file); err != nil {
 		log.Infof("File copy error: %v", err)
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return
@@ -224,36 +327,23 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func downloadFile(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["userid"]
-	filename := vars["filename"]
+	userID := mux.Vars(r)["userid"]
+	filename := mux.Vars(r)["filename"]
 
-	userDownloadDir := filepath.Join("./user_data", userID, "download")
+	userDownloadDir := private_channel.GetUserDownloadDir(userID)
 	filepath := filepath.Join(userDownloadDir, filename)
-	file, err := os.Open(filepath)
-	if err != nil {
-		log.Infof("File open error: %v", err)
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-	defer file.Close()
-
-	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
-	w.Header().Set("Content-Type", "application/octet-stream")
-	_, err = io.Copy(w, file)
-	if err != nil {
-		log.Infof("File copy error: %v", err)
-		http.Error(w, "Failed to download file", http.StatusInternalServerError)
-		return
-	}
+	download(w, filepath, filename)
 }
 
 func downloadPublicFile(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	filename := vars["filename"]
+	filename := mux.Vars(r)["filename"]
 
-	publicDir := "./public"
+	publicDir := private_channel.GetPublicDir()
 	filepath := filepath.Join(publicDir, filename)
+	download(w, filepath, filename)
+}
+
+func download(w http.ResponseWriter, filepath, filename string) {
 	file, err := os.Open(filepath)
 	if err != nil {
 		log.Infof("File open error: %v", err)
@@ -264,8 +354,7 @@ func downloadPublicFile(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
 	w.Header().Set("Content-Type", "application/octet-stream")
-	_, err = io.Copy(w, file)
-	if err != nil {
+	if _, err := io.Copy(w, file); err != nil {
 		log.Infof("File copy error: %v", err)
 		http.Error(w, "Failed to download file", http.StatusInternalServerError)
 		return

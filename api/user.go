@@ -10,25 +10,27 @@ import (
 	"github.com/gorilla/mux"
 )
 
-type UserMyConfig struct {
-	TTSVoice   string `json:"tts_voice"`
-	TTSSpeed   string `json:"tts_speed"`
-	SourceLang string `json:"source_language"`
-	TargetLang string `json:"target_language"`
+type Translation struct {
+	SourceLang string `json:"sourceLanguage"`
+	TargetLang string `json:"targetLanguage"`
+}
+type MyConfig struct {
+	TTSVoice string `json:"ttsVoice"`
+	TTSSpeed string `json:"ttsSpeed"`
 }
 type User struct {
-	ID         int          `json:"id"`
-	Name       string       `json:"name"`
-	UserID     string       `json:"userid"`
-	Password   string       `json:"password"`
-	Account    int          `json:"account"`
-	Age        int          `json:"age"`
-	Purpose    string       `json:"purpose"`
-	Created    time.Time    `json:"created"`
-	Updated    *time.Time   `json:"updated"`
-	RewardInfo string       `json:"reward_info"`
-	MyConfig   UserMyConfig `json:"myconfig"`
-	DeviceIDs  string       `json:"device_ids"`
+	ID         int        `json:"id"`
+	Name       string     `json:"name"`
+	UserID     string     `json:"userid"`
+	Password   string     `json:"password"`
+	Account    int        `json:"account"`
+	Age        int        `json:"age"`
+	Purpose    string     `json:"purpose"`
+	Created    time.Time  `json:"created"`
+	Updated    *time.Time `json:"updated"`
+	RewardInfo string     `json:"reward_info"`
+	MyConfig   MyConfig   `json:"myconfig"`
+	DeviceIDs  string     `json:"device_ids"`
 }
 
 type Response struct {
@@ -48,8 +50,15 @@ func RegisterUser(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	myConfigStr, err := json.Marshal(user.MyConfig)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	log.Info("myConfigStr:", string(myConfigStr))
+
 	query := "INSERT INTO user (name, userid, password, age, purpose, reward_info, myconfig, device_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-	_, err = db.Insert(query, user.Name, user.UserID, user.Password, user.Age, user.Purpose, user.RewardInfo, user.MyConfig, user.DeviceIDs)
+	_, err = db.Insert(query, user.Name, user.UserID, user.Password, user.Age, user.Purpose, user.RewardInfo, string(myConfigStr), user.DeviceIDs)
 	if err != nil {
 		log.Error(err)
 		response := Response{Success: false, Error: err.Error()}
@@ -66,6 +75,7 @@ func RegisterUser(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 func LoginUser(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 	log.Info("LoginUser")
 	var user User
+	var myConfigStr string
 	err := json.NewDecoder(r.Body).Decode(&user)
 	if err != nil {
 		response := Response{Success: false, Error: err.Error()}
@@ -76,10 +86,18 @@ func LoginUser(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 
 	query := "SELECT iduser, name, account, age, purpose, created, updated, reward_info, myconfig, device_ids FROM user WHERE userid = ? AND password = ?"
 	row := db.QueryRow(query, user.UserID, user.Password)
-	err = row.Scan(&user.ID, &user.Name, &user.Account, &user.Age, &user.Purpose, &user.Created, &user.Updated, &user.RewardInfo, &user.MyConfig, &user.DeviceIDs)
+	err = row.Scan(&user.ID, &user.Name, &user.Account, &user.Age, &user.Purpose, &user.Created, &user.Updated, &user.RewardInfo, &myConfigStr, &user.DeviceIDs)
 	if err != nil {
 		log.Error(err)
 		response := Response{Success: false, Error: "Invalid credentials"}
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+	err = json.Unmarshal([]byte(myConfigStr), &user.MyConfig)
+	if err != nil {
+		log.Error(err)
+		response := Response{Success: false, Error: "Invalid myConfig"}
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(response)
 		return
@@ -90,17 +108,26 @@ func LoginUser(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func GetUser(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
+func GetUserHttp(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["userid"]
 
-	query := "SELECT iduser, name, account, age, purpose, created, updated, reward_info, myconfig, device_ids FROM user WHERE userid = ?"
+	query := "SELECT iduser, userid, name, account, age, purpose, created, updated, reward_info, myconfig, device_ids FROM user WHERE userid = ?"
 	row := db.QueryRow(query, userID)
 
 	var user User
-	err := row.Scan(&user.ID, &user.Name, &user.Account, &user.Age, &user.Purpose, &user.Created, &user.Updated, &user.RewardInfo, &user.MyConfig, &user.DeviceIDs)
+	var myConfigStr string
+	err := row.Scan(&user.ID, &user.UserID, &user.Name, &user.Account, &user.Age, &user.Purpose, &user.Created, &user.Updated, &user.RewardInfo, &myConfigStr, &user.DeviceIDs)
 	if err != nil {
 		response := Response{Success: false, Error: "User not found"}
 		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+	err = json.Unmarshal([]byte(myConfigStr), &user.MyConfig)
+	if err != nil {
+		log.Error(err)
+		response := Response{Success: false, Error: "Invalid myConfig"}
+		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(response)
 		return
 	}
@@ -109,21 +136,44 @@ func GetUser(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+func GetUser(db *dbutil.MySQLDB, deviceId string) (User, error) {
+	query := "SELECT iduser, name, account, age, purpose, created, updated, reward_info, myconfig, device_ids FROM user WHERE userid = ?"
+	row := db.QueryRow(query, deviceId)
+
+	var user User
+	var myConfigStr string
+	err := row.Scan(&user.ID, &user.Name, &user.Account, &user.Age, &user.Purpose, &user.Created, &user.Updated, &user.RewardInfo, &myConfigStr, &user.DeviceIDs)
+	if err != nil {
+		return user, err
+	}
+	err = json.Unmarshal([]byte(myConfigStr), &user.MyConfig)
+	if err != nil {
+		log.Error(err)
+	}
+	return user, err
+}
 
 func UpdateUser(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["userid"]
 	var user User
 	err := json.NewDecoder(r.Body).Decode(&user)
 	if err != nil {
+		log.Error(err)
 		response := Response{Success: false, Error: err.Error()}
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(response)
 		return
 	}
+	log.Info("user.MyConfig:", user.MyConfig)
+	myConfigStr, err:=json.Marshal(user.MyConfig)
+	if err != nil {
+		log.Error(err)
+	} 
 
 	query := "UPDATE user SET name = ?, password = ?, age = ?, purpose = ?, reward_info = ?, myconfig = ?, device_ids = ?, updated = CURRENT_TIMESTAMP WHERE userid = ?"
-	_, err = db.Update(query, user.Name, user.Password, user.Age, user.Purpose, user.RewardInfo, user.MyConfig, user.DeviceIDs, userID)
+	_, err = db.Update(query, user.Name, user.Password, user.Age, user.Purpose, user.RewardInfo, myConfigStr, user.DeviceIDs, userID)
 	if err != nil {
+		log.Error(err)
 		response := Response{Success: false, Error: err.Error()}
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(response)

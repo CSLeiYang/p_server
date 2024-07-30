@@ -12,9 +12,10 @@ import (
 )
 
 type PCommand struct {
-	SID    string `json:"sid"`
-	Cmd    string `json:"cmd"`
-	Params string `json:"params"`
+	SID        string                 `json:"sid"`
+	Cmd        string                 `json:"cmd"`
+	Params     string                 `json:"params"`
+	JsonParams map[string]interface{} `json:"json_params"`
 }
 
 type PEvent struct {
@@ -25,11 +26,12 @@ type PEvent struct {
 }
 
 type WsMessage struct {
-	UserID   string   `json:"userid"`
-	ReqId    uint32   `json:"reqid"`
-	BizInfo  PCommand `json:"biz_info"`
-	Content  string   `json:"content"`
-	FileName string   `json:"file_name"`
+	UserID     string                 `json:"userid"`
+	ReqId      uint32                 `json:"reqid"`
+	BizInfo    PCommand               `json:"biz_info"`
+	Content    string                 `json:"content"`
+	FileName   string                 `json:"file_name"`
+	JsonParams map[string]interface{} `json:"json_params"`
 }
 
 type WsEvent struct {
@@ -95,6 +97,7 @@ func HandlePEvent(userId uint64, isStream, wholePM bool, bizInfo string, content
 				UserID:   userIdStr,
 				Event:    pEvent,
 				ReqId:    uint32(reqId),
+				RespId:   uint32(reqId),
 				FileName: fileName,
 			})
 		case "IMAGE":
@@ -106,6 +109,7 @@ func HandlePEvent(userId uint64, isStream, wholePM bool, bizInfo string, content
 				UserID:   userIdStr,
 				Event:    pEvent,
 				ReqId:    uint32(reqId),
+				RespId:   uint32(reqId),
 				Content:  string(content),
 				FileName: fileName,
 			})
@@ -116,6 +120,7 @@ func HandlePEvent(userId uint64, isStream, wholePM bool, bizInfo string, content
 				UserID:  userIdStr,
 				Event:   pEvent,
 				ReqId:   uint32(reqId),
+				RespId:  uint32(reqId),
 				Content: string(content),
 			})
 

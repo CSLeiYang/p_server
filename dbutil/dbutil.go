@@ -13,8 +13,9 @@ type MySQLDB struct {
 }
 
 func (mdb *MySQLDB) CreateTable() error {
-	createUserTableSQL := `CREATE TABLE IF NOT EXISTS user (
-		"iduser" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,		
+	createUserTableSQL := `
+	CREATE TABLE IF NOT EXISTS user (
+		"iduser" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 		"name" TEXT,
 		"userid" TEXT UNIQUE,
 		"password" TEXT,
@@ -25,8 +26,17 @@ func (mdb *MySQLDB) CreateTable() error {
 		"updated" TIMESTAMP,
 		"reward_info" TEXT,
 		"myconfig" TEXT DEFAULT '{"pronunciation_correction", "grammar_correction", "listening_practice", "free_talk"}',
-		"device_ids" TEXT
-	);`
+		"device_ids" TEXT NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS prompt (
+		"idprompt" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+		"name" TEXT,
+		"prompt" TEXT,
+		"created" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		"updated" TIMESTAMP
+	);
+
+	`
 
 	stmt, err := mdb.Prepare(createUserTableSQL)
 	if err != nil {

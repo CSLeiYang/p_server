@@ -85,7 +85,8 @@
             "params": "6543|ai.png|简单描述内容|true"
         },
         "reqid":6543,
-        "file_name": "ai.png"
+        "file_name": "ai.png",
+        "json_params":,
 
     }
 ```
