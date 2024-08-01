@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -91,9 +92,20 @@ func main() {
 	handler := c.Handler(router)
 	go handleWsMessages()
 
-	log.Info("Server started on :8000")
-	if err := http.ListenAndServe(":8000", handler); err != nil {
-		log.Error("ListenAndServe: ", err)
+	// Configure HTTPS server
+	server := &http.Server{
+		Addr:         ":8443", // HTTPS typically runs on port 443, but for development we use 8443
+		Handler:      handler,
+		TLSConfig:    &tls.Config{MinVersion: tls.VersionTLS13}, // Enforce TLS 1.3
+	}
+
+	// Provide paths to your certificate and key files
+	certFile := "path/to/your/certificate.crt"
+	keyFile := "path/to/your/private.key"
+
+	log.Info("Server started on https://localhost:8443")
+	if err := server.ListenAndServeTLS(certFile, keyFile); err != nil {
+		log.Error("ListenAndServeTLS: ", err)
 	}
 }
 
