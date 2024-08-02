@@ -34,6 +34,10 @@ var (
 	db        *dbutil.MySQLDB
 )
 
+//openssl genpkey -algorithm RSA -out private.key
+
+//openssl req -new -x509 -key private.key -out certificate.crt -days 3650
+
 func main() {
 	var err error
 	// dsn := "user:password@tcp(localhost:3306)/dbname"
@@ -100,8 +104,8 @@ func main() {
 	}
 
 	// Provide paths to your certificate and key files
-	certFile := "path/to/your/certificate.crt"
-	keyFile := "path/to/your/private.key"
+	certFile := "cert.pem"
+	keyFile := "privatekey.pem"
 
 	log.Info("Server started on https://localhost:8443")
 	if err := server.ListenAndServeTLS(certFile, keyFile); err != nil {
