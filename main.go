@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -98,14 +99,14 @@ func main() {
 
 	// Configure HTTPS server
 	server := &http.Server{
-		Addr:         ":8443", // HTTPS typically runs on port 443, but for development we use 8443
-		Handler:      handler,
-		TLSConfig:    &tls.Config{MinVersion: tls.VersionTLS13}, // Enforce TLS 1.3
+		Addr:      ":8443", // HTTPS typically runs on port 443, but for development we use 8443
+		Handler:   handler,
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}, // Enforce TLS 1.3
 	}
 
 	// Provide paths to your certificate and key files
-	certFile := "cert.pem"
-	keyFile := "privatekey.pem"
+	certFile := "fullchain.pem"
+	keyFile := "privkey.pem"
 
 	log.Info("Server started on https://localhost:8443")
 	if err := server.ListenAndServeTLS(certFile, keyFile); err != nil {
@@ -210,12 +211,7 @@ func handleWsMessages() {
 						log.Warnf("file_name is empty, ignore the msg: %v", msg)
 						continue
 					}
-					fileUri := filepath.Join(private_channel.GetUserUploadDir(msg.UserID), msg.FileName)
-					fileContent, err := os.ReadFile(fileUri)
-					if err != nil {
-						log.Error(err)
-						continue
-					}
+
 					log.Infof("bizInfo: %s", string(bizInfo))
 					if msg.BizInfo.Cmd == "ASR" {
 						myUser, err := api.GetUser(db, userID)
@@ -228,7 +224,18 @@ func handleWsMessages() {
 						} else {
 							log.Error(err)
 						}
+
+						fileUri := filepath.Join(private_channel.GetUserUploadDir(msg.UserID), msg.FileName)
+						tmpFileUri:=fileUri+"t"
+						cmd := exec.Command("sox", fileUri, tmpFileUri, "noisereduce")
+						err = cmd.Run()
+						if err != nil {
+							log.Warn("sox run error:", err)
+						}
+						exec.Command("mv", tmpFileUri, fileUri).Run()
+
 					}
+
 					prompt, err := api.GetPromptFromDbByName(db, msg.JsonParams)
 					if err == nil && len(prompt) > 0 {
 						log.Info("get prompt from db:", prompt)
@@ -237,6 +244,13 @@ func handleWsMessages() {
 
 					bizInfo, _ = json.Marshal(&msg.BizInfo)
 					log.Info("modified bizInfo: ", string(bizInfo))
+
+					fileUri := filepath.Join(private_channel.GetUserUploadDir(msg.UserID), msg.FileName)
+					fileContent, err := os.ReadFile(fileUri)
+					if err != nil {
+						log.Error(err)
+						continue
+					}
 					if err := pUdpConn.SendPrivateMessage(&private_channel.PrivateMessage{
 						StreamId:    msgUserIdUint,
 						Tid:         uint64(msg.ReqId),
