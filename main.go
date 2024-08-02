@@ -224,16 +224,6 @@ func handleWsMessages() {
 						} else {
 							log.Error(err)
 						}
-
-						fileUri := filepath.Join(private_channel.GetUserUploadDir(msg.UserID), msg.FileName)
-						tmpFileUri:=fileUri+"t"
-						cmd := exec.Command("sox", fileUri, tmpFileUri, "noisereduce")
-						err = cmd.Run()
-						if err != nil {
-							log.Warn("sox run error:", err)
-						}
-						exec.Command("mv", tmpFileUri, fileUri).Run()
-
 					}
 
 					prompt, err := api.GetPromptFromDbByName(db, msg.JsonParams)
