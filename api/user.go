@@ -1,9 +1,14 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
+
+	"math/rand"
 
 	"csleiyang.com/p_server/dbutil"
 	log "csleiyang.com/p_server/logger"
@@ -20,7 +25,7 @@ type MyConfig struct {
 }
 type User struct {
 	ID         int        `json:"id"`
-	Name       string     `json:"name"`
+	Name       *string     `json:"name"`
 	UserID     string     `json:"userid"`
 	Password   string     `json:"password"`
 	Account    int        `json:"account"`
@@ -107,21 +112,53 @@ func LoginUser(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
-
+func GenerateRandomInt(min, max int) int {
+	if min > max {
+		min, max = max, min
+	}
+	return min + rand.Intn(max-min+1)
+}
 func GetUserHttp(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 	userID := mux.Vars(r)["userid"]
 
-	query := "SELECT iduser, userid, name, account, age, purpose, created, updated, reward_info, myconfig, device_ids FROM user WHERE userid = ?"
-	row := db.QueryRow(query, userID)
+	query := "SELECT iduser, userid, name, account, age, purpose, created, updated, reward_info, myconfig, device_ids FROM user WHERE userid = ? or device_ids= ?"
+	row := db.QueryRow(query, userID, userID)
 
 	var user User
 	var myConfigStr string
 	err := row.Scan(&user.ID, &user.UserID, &user.Name, &user.Account, &user.Age, &user.Purpose, &user.Created, &user.Updated, &user.RewardInfo, &myConfigStr, &user.DeviceIDs)
 	if err != nil {
-		response := Response{Success: false, Error: "User not found"}
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(response)
-		return
+		_, errNum := strconv.Atoi(userID)
+		if err == sql.ErrNoRows && errNum != nil {
+			//create new user based device_ids
+			newUserId := GenerateRandomInt(1000000000, 9999999999)
+			user.UserID = fmt.Sprintf("%d", newUserId)
+			user.DeviceIDs = userID
+			newQuery := "INSERT INTO user (userid, device_ids) VALUES (?, ?)"
+			_, err = db.Insert(newQuery, newUserId, userID)
+			if err == nil {
+
+				response := Response{Success: true, Data: user}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(response)
+				return
+
+			} else {
+				response := Response{Success: false, Error: "Create User failed"}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(response)
+				return
+
+			}
+
+		} else {
+			log.Error(err)
+			response := Response{Success: false, Error: "User not found"}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
 	}
 	err = json.Unmarshal([]byte(myConfigStr), &user.MyConfig)
 	if err != nil {
@@ -165,10 +202,10 @@ func UpdateUser(db *dbutil.MySQLDB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Info("user.MyConfig:", user.MyConfig)
-	myConfigStr, err:=json.Marshal(user.MyConfig)
+	myConfigStr, err := json.Marshal(user.MyConfig)
 	if err != nil {
 		log.Error(err)
-	} 
+	}
 
 	query := "UPDATE user SET name = ?, password = ?, age = ?, purpose = ?, reward_info = ?, myconfig = ?, device_ids = ?, updated = CURRENT_TIMESTAMP WHERE userid = ?"
 	_, err = db.Update(query, user.Name, user.Password, user.Age, user.Purpose, user.RewardInfo, myConfigStr, user.DeviceIDs, userID)

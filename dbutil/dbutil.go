@@ -16,17 +16,17 @@ func (mdb *MySQLDB) CreateTable() error {
 	createUserTableSQL := `
 	CREATE TABLE IF NOT EXISTS user (
 		"iduser" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-		"name" TEXT,
-		"userid" TEXT UNIQUE,
-		"password" TEXT,
+		"name" TEXT DEFAULT '' ,
+		"userid" TEXT UNIQUE DEFAULT '',
+		"password" TEXT DEFAULT '',
 		"account" INTEGER DEFAULT 10000,
-		"age" INTEGER,
-		"purpose" TEXT,
+		"age" INTEGER DEFAULT 0,
+		"purpose" TEXT DEFAULT '',
 		"created" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		"updated" TIMESTAMP,
-		"reward_info" TEXT,
-		"myconfig" TEXT DEFAULT '{"pronunciation_correction", "grammar_correction", "listening_practice", "free_talk"}',
-		"device_ids" TEXT NOT NULL
+		"reward_info" TEXT DEFAULT '',
+		"myconfig" TEXT DEFAULT '{}',
+		"device_ids" TEXT UNIQUE NOT NULL
 	);
 	CREATE TABLE IF NOT EXISTS prompt (
 		"idprompt" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,

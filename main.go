@@ -104,8 +104,8 @@ func main() {
 	}
 
 	// Provide paths to your certificate and key files
-	certFile := "fullchain.pem"
-	keyFile := "privkey.pem"
+	certFile := "./service-v2.aiiyou.cn/fullchain.pem"
+	keyFile := "./service-v2.aiiyou.cn/privkey.pem"
 
 	log.Info("Server started on https://localhost:8443")
 	if err := server.ListenAndServeTLS(certFile, keyFile); err != nil {
