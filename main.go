@@ -210,20 +210,7 @@ func handleWsMessages() {
 						log.Warnf("file_name is empty, ignore the msg: %v", msg)
 						continue
 					}
-
 					log.Infof("bizInfo: %s", string(bizInfo))
-					if msg.BizInfo.Cmd == "ASR" {
-						myUser, err := api.GetUser(db, userID)
-						if err == nil {
-							ttsConfig := make(map[string]interface{})
-							ttsConfig["ttsVoice"] = myUser.MyConfig.TTSVoice
-							ttsConfig["ttsSpeed"] = myUser.MyConfig.TTSSpeed
-							msg.BizInfo.JsonParams = ttsConfig
-
-						} else {
-							log.Error(err)
-						}
-					}
 
 					prompt, err := api.GetPromptFromDbByName(db, msg.JsonParams)
 					if err == nil && len(prompt) > 0 {
@@ -284,6 +271,8 @@ func handleWsMessages() {
 					}
 				}
 
+			} else {
+				log.Warnf("client[%s] streamId:%d, msgUserIdUint: %d, msg:%s will be ignore!", userID, clients[userID].StreamId, msgUserIdUint, msg)
 			}
 		}
 		mutex.Unlock()
@@ -365,7 +354,7 @@ func downloadPublicFile(w http.ResponseWriter, r *http.Request) {
 func download(w http.ResponseWriter, filepath, filename string) {
 	file, err := os.Open(filepath)
 	if err != nil {
-		log.Infof("File open error: %v", err)
+		log.Errorf("File open error: %v", err)
 		http.Error(w, "File not found", http.StatusNotFound)
 		return
 	}
