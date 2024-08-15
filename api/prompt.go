@@ -10,7 +10,9 @@ import (
 )
 
 const (
-	BIZ_PROMPT = "biz_prompt"
+	BIZ_PROMPT       = "biz_prompt"
+	BIZ_PROMPT_AUDIO = "biz_prompt_audio"
+	BIZ_PROMPT_IMAGE = "biz_prompt_image"
 )
 
 type Prompt struct {
@@ -45,8 +47,8 @@ func ReplacePlaceholders(template string, jsonParams map[string]interface{}, use
 	return template
 }
 
-func GetPromptFromDbByName(db *dbutil.MySQLDB, JsonParams map[string]interface{}) (string, error) {
-	if bizPrompt, exist := JsonParams[BIZ_PROMPT]; exist {
+func GetPromptFromDbByName(db *dbutil.MySQLDB, JsonParams map[string]interface{}, promptKey string) (string, error) {
+	if bizPrompt, exist := JsonParams[promptKey]; exist {
 		bizPromptStr, ok := bizPrompt.(string)
 		if !ok {
 			return "", errors.New("Error: BIZ_PROMPT is not a string")

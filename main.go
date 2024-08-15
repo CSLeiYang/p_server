@@ -212,10 +212,16 @@ func handleWsMessages() {
 					}
 					log.Infof("bizInfo: %s", string(bizInfo))
 
-					prompt, err := api.GetPromptFromDbByName(db, msg.JsonParams)
-					if err == nil && len(prompt) > 0 {
-						log.Info("get prompt from db:", prompt)
-						msg.BizInfo.JsonParams["prompt"] = prompt
+					promptAudio, err := api.GetPromptFromDbByName(db, msg.JsonParams, api.BIZ_PROMPT_AUDIO)
+					if err == nil && len(promptAudio) > 0 {
+						log.Info("get prompt from db:", promptAudio)
+						msg.BizInfo.JsonParams["promptAudio"] = promptAudio
+					}
+
+					promptImage, err := api.GetPromptFromDbByName(db, msg.JsonParams, api.BIZ_PROMPT_IMAGE)
+					if err == nil && len(promptImage) > 0 {
+						log.Info("get prompt from db:", promptImage)
+						msg.BizInfo.JsonParams["promptImage"] = promptImage
 					}
 
 					bizInfo, _ = json.Marshal(&msg.BizInfo)
