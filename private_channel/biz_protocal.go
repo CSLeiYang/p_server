@@ -59,16 +59,17 @@ func HandlePEvent(userId uint64, isStream, wholePM bool, bizInfo string, content
 
 	if isStream {
 		bizinfoUint, _ := strconv.ParseUint(bizInfo, 10, 32)
-		if pUdpCon.WsConn !=nil {
-			pUdpCon.WsConn.WriteJSON(&WsEvent{
+			err:=pUdpCon.WsConn.WriteJSON(&WsEvent{
 				UserID:  userIdStr,
 				RespId:  uint32(bizinfoUint),
 				Content: string(content),
 			})
-		}else{
-			log.Warn("pUdpCon.Wsconn")
-		}
-		
+			if err!=nil{
+				log.Error("WsConn.WriteJSON error:", err)
+				return errors.New("WsConn.WriteJson error.")
+
+			}
+
 
 	} else {
 		if strings.Contains(bizInfo, "Heartbeat") {
