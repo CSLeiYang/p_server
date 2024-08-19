@@ -62,6 +62,7 @@ type PUdpConn struct {
 	conn          *net.UDPConn
 	remoteAddr    *net.UDPAddr
 	WsConn        *websocket.Conn
+	WSConnMU  sync.Mutex
 	Done          chan struct{}
 }
 

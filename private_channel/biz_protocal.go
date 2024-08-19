@@ -59,17 +59,17 @@ func HandlePEvent(userId uint64, isStream, wholePM bool, bizInfo string, content
 
 	if isStream {
 		bizinfoUint, _ := strconv.ParseUint(bizInfo, 10, 32)
-			err:=pUdpCon.WsConn.WriteJSON(&WsEvent{
-				UserID:  userIdStr,
-				RespId:  uint32(bizinfoUint),
-				Content: string(content),
-			})
-			if err!=nil{
-				log.Error("WsConn.WriteJSON error:", err)
-				return errors.New("WsConn.WriteJson error.")
-
-			}
-
+		pUdpCon.WSConnMU.Lock()
+		err := pUdpCon.WsConn.WriteJSON(&WsEvent{
+			UserID:  userIdStr,
+			RespId:  uint32(bizinfoUint),
+			Content: string(content),
+		})
+		pUdpCon.WSConnMU.Unlock()
+		if err != nil {
+			log.Error("WsConn.WriteJSON error:", err)
+			return errors.New("wsConn.WriteJson error")
+		}
 
 	} else {
 		if strings.Contains(bizInfo, "Heartbeat") {
@@ -99,18 +99,25 @@ func HandlePEvent(userId uint64, isStream, wholePM bool, bizInfo string, content
 				log.Error(err)
 				return err
 			}
-			pUdpCon.WsConn.WriteJSON(&WsEvent{
+			pUdpCon.WSConnMU.Lock()
+			err = pUdpCon.WsConn.WriteJSON(&WsEvent{
 				UserID:   userIdStr,
 				Event:    pEvent,
 				ReqId:    uint32(reqId),
 				RespId:   uint32(reqId),
 				FileName: fileName,
 			})
+			pUdpCon.WSConnMU.Unlock()
+			if err != nil {
+				log.Error(err)
+				return err
+			}
 		case "IMAGE":
 			fileName := ""
 			if len(eventParamsSplits) > 1 {
 				fileName = eventParamsSplits[1]
 			}
+			pUdpCon.WSConnMU.Lock()
 			pUdpCon.WsConn.WriteJSON(&WsEvent{
 				UserID:   userIdStr,
 				Event:    pEvent,
@@ -119,16 +126,22 @@ func HandlePEvent(userId uint64, isStream, wholePM bool, bizInfo string, content
 				Content:  string(content),
 				FileName: fileName,
 			})
+			pUdpCon.WSConnMU.Unlock()
+
 
 		default:
 			log.Info("content:", string(content))
-			pUdpCon.WsConn.WriteJSON(&WsEvent{
+			err = pUdpCon.WsConn.WriteJSON(&WsEvent{
 				UserID:  userIdStr,
 				Event:   pEvent,
 				ReqId:   uint32(reqId),
 				RespId:  uint32(reqId),
 				Content: string(content),
 			})
+			if err != nil {
+				log.Error(err)
+				return err
+			}
 
 		}
 	}
