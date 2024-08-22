@@ -170,6 +170,10 @@ func readFromWebSocket(ws *websocket.Conn, userID string) {
 			break
 		}
 		log.Infof("Received message from user %s: %v", userID, msg)
+		if _, ok := clients[userID]; !ok {
+			log.Errorf("clients[] not exist, will close ws", userID)
+			break
+		}
 		msg.UserID = userID
 		if msg.BizInfo.JsonParams == nil {
 			msg.BizInfo.JsonParams = make(map[string]interface{})
@@ -180,6 +184,7 @@ func readFromWebSocket(ws *websocket.Conn, userID string) {
 
 func handleWsMessages() {
 	for msg := range broadcast {
+		log.Infof("handleWsMessages:%v, clients:%v", msg, clients)
 		mutex.Lock()
 		for userID, pUdpConn := range clients {
 			log.Infof("Handling message for user: %s, message:%v", userID, msg)
