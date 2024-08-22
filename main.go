@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -260,12 +261,17 @@ func handleWsMessages() {
 							continue
 						}
 						log.Info("bizPrompt:", bizPromptStr)
-						promtpDb, err := api.GetPrompt(db, bizPromptStr)
-						if err != nil {
-							log.Error(err)
-							continue
+						bizFinalPromptStr:=bizPromptStr
+						if !strings.Contains(bizPromptStr, "# ")  && len(bizPromptStr) > 64 {
+							promtpDb, err := api.GetPrompt(db, bizPromptStr)
+							if err != nil {
+								log.Error(err)
+								continue
+							}
+							bizFinalPromptStr=promtpDb.Prompt
 						}
-						finalContent = api.ReplacePlaceholders(promtpDb.Prompt, msg.JsonParams, msg.Content)
+
+						finalContent = api.ReplacePlaceholders(bizFinalPromptStr, msg.JsonParams, msg.Content)
 					}
 					log.Info("finalContent:", finalContent)
 
