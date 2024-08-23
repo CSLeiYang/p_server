@@ -69,6 +69,9 @@ func main() {
 	router.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		api.RegisterUser(db, w, r)
 	}).Methods("POST")
+	router.HandleFunc("/feedback", func(w http.ResponseWriter, r *http.Request) {
+		api.PostFeedBack(db, w, r)
+	}).Methods("POST")
 	router.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		api.LoginUser(db, w, r)
 	}).Methods("POST")
@@ -262,7 +265,7 @@ func handleWsMessages() {
 						}
 						log.Info("bizPrompt:", bizPromptStr)
 						bizFinalPromptStr:=bizPromptStr
-						if !strings.Contains(bizPromptStr, "# ")  && len(bizPromptStr) > 64 {
+						if !strings.Contains(bizPromptStr, "# ")  && len(bizPromptStr) < 64 {
 							promtpDb, err := api.GetPrompt(db, bizPromptStr)
 							if err != nil {
 								log.Error(err)

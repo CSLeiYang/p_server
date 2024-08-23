@@ -51,7 +51,7 @@ func GetPromptFromDbByName(db *dbutil.MySQLDB, JsonParams map[string]interface{}
 	if bizPrompt, exist := JsonParams[promptKey]; exist {
 		bizPromptStr, ok := bizPrompt.(string)
 		if !ok {
-			return "", errors.New("Error: BIZ_PROMPT is not a string")
+			return "", errors.New("error: BIZ_PROMPT is not a string")
 		}
 		promtpDb, err := GetPrompt(db, bizPromptStr)
 		if err != nil {
@@ -59,6 +59,6 @@ func GetPromptFromDbByName(db *dbutil.MySQLDB, JsonParams map[string]interface{}
 		}
 		return ReplacePlaceholders(promtpDb.Prompt, JsonParams, ""), nil
 	} else {
-		return "", fmt.Errorf("%s not exist.", BIZ_PROMPT)
+		return "", fmt.Errorf("%s not exist", BIZ_PROMPT)
 	}
 }

@@ -36,6 +36,11 @@ func (mdb *MySQLDB) CreateTable() error {
 		"updated" TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS feedback (
+		"idfb" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+		"content" TEXT,
+		"created" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	);
 	`
 
 	stmt, err := mdb.Prepare(createUserTableSQL)
