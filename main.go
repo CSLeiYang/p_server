@@ -104,7 +104,7 @@ func main() {
 	server := &http.Server{
 		Addr:      ":8443", // HTTPS typically runs on port 443, but for development we use 8443
 		Handler:   handler,
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}, // Enforce TLS 1.3
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS10}, // Enforce TLS 1.3
 	}
 
 	// Provide paths to your certificate and key files
